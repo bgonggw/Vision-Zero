@@ -7,15 +7,12 @@ library(ggmap)
 library(maps)
 library(caTools) # In case subset is needed
 library(RColorBrewer)
-# library(reshape2)
-# library(zoo)
-
-setwd('C:/Users/jonat/Dropbox/Bootcamp/Visualization Project')
 
 # Load UDFs
 sapply(paste0('UDF/', list.files('UDF')), source)
 
 #### Read & Convert Data ####
+# You need to download this data by yourself. See link in Github's README
 collision <- fread('NYPD_Motor_Vehicle_Collisions.csv', stringsAsFactors = F)
 
 # Transform Date & Time (rounded to hour)
@@ -44,11 +41,11 @@ right_dt  <- work_dt %>%
          -matches('KILLED|INJURED'),
          ID = `UNIQUE KEY`)
 
-factor_dt  <- melt_count(work_dt, 'matches', 'FACTOR', 'cat') %>% 
-  merge(right_dt, by = 'ID')
-
-vehicle_dt <- melt_count(work_dt, 'starts', 'VEHICLE', 'cat') %>% 
-  merge(right_dt, by = 'ID')
+# factor_dt  <- melt_count(work_dt, 'matches', 'FACTOR', 'cat') %>% 
+#   merge(right_dt, by = 'ID')
+# 
+# vehicle_dt <- melt_count(work_dt, 'starts', 'VEHICLE', 'cat') %>% 
+#   merge(right_dt, by = 'ID')
 
 injur_dt <- melt_count(work_dt, 'ends', 'INJURED', 'stat') %>% 
   merge(right_dt, by = 'ID')
@@ -64,7 +61,8 @@ g <- ggplot(data = sample_set(work_dt),
                 y = YEAR))
 g +
   geom_tile(aes(fill = factor(YEAR)), color = 'white') +
-  labs(x = 'Month', title = 'Time Range of NYC Motor Vehicle Collision Data') +
+  # ggtitle('Time Range of NYC Motor Vehicle Collision Data') +
+  labs(x = 'Month')+
   theme(legend.position = 'none', 
         axis.text=element_text(size=12),
         axis.title=element_text(size=14,face="bold")
@@ -73,9 +71,12 @@ g +
 # Group by 12-month periods for analysis
 g +
   geom_tile(aes(fill = PERIOD), color = 'white') +
-  labs(x = 'Month', title = '12 Month Periods For Yearly Comparison') +
+  labs(x = 'Month') +
+  # ggtitle('12 Month Periods For Yearly Comparison') +
   theme(legend.position = 'top',
-        legend.title = element_text(face="bold"))
+        legend.title = element_text(face="bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
 
 #### 2. Count of accidents per year ####
 accident_n_dt <- work_dt %>%
@@ -98,30 +99,70 @@ accident_p_vec <- c(0, tail(accident_n_dt$N, nrow(accident_n_dt) - 1) /
 
 # NUmber of registered vehicles in NYC
 # https://dmv.ny.gov/about-dmv/statistical-summaries
-reg_nyc <- read.csv('Num of nyc car registrations.csv')
+reg_nyc <- read.csv('nyc_car_reg.csv')
 reg_p_vec <- c(0, tail(reg_nyc$Reg_num, nrow(reg_nyc)-1) /
                  head(reg_nyc$Reg_num, nrow(reg_nyc)-1) - 1)
 
-ggplot(data = data.frame(Year = rep(seq(2012, 2015), 2),
-                         Type = rep(c('mvc', 'reg'), each = 4),
-                         P = c(accident_p_vec, reg_p_vec)),
-       aes(x = Year, y = P, color = Type)
-       ) + 
+temp <- data.frame(PERIOD = rep(sort(unique(work_dt$PERIOD)), 2),
+                   TYPE   = rep(c('Motor Vehicle Collision',
+                                  'Vehicle Registration in NYC'), each = 4),
+                   VALUE  = c(accident_p_vec, reg_p_vec))
+ggplot(data = temp,
+       aes(x = PERIOD, y = VALUE, color = TYPE, group = TYPE)) + 
   geom_point(size = 3) +
   geom_line(size = 2, alpha = .8) +
   scale_y_continuous(labels = scales::percent) +
-  scale_color_discrete(name = NULL,
-                       labels = c('Accidents',
-                                  'Registered Cars')) +
-  guides(color = guide_legend(ncol = 1)) +
-  theme(legend.justification=c(0,1), legend.position=c(.05,.95),
-        legend.background = element_rect(fill = alpha('white', 0)),
-        legend.text = element_text(size = 12, face = "bold"),
+  theme(legend.position = 'none') +
+  labs(title = 'Yearly Growth Rate', y = '% Growth Since Last Year') +
+  facet_wrap( ~ TYPE, nrow = 2)
+
+#### 3. Injury Per Period ####
+injur_n_dt <- injur_dt               %>%
+  group_by(PERIOD, INJURED)          %>%
+  summarise(Injury = sum(INJURED_V))  %>%
+  filter(!grepl('PERSONS', INJURED)) %>% # Num. of persons is the total of 
+  # other three stats
+  arrange(desc(Injury)) %>%
+  mutate(INJURED = INJURED %>%
+           gsub('NUMBER OF ', '', .) %>%
+           gsub(' INJURED', '', .) %>% 
+           factor(levels = c('CYCLIST', 
+                             'PEDESTRIANS', 
+                             'MOTORIST')))
+
+
+injur_n_label_dt <- injur_n_dt %>%
+  group_by(PERIOD) %>%
+  summarise(N = sum(Injury))
+
+g <- ggplot(data = injur_n_dt) +
+  geom_bar(aes(x = PERIOD, y = Injury, fill = reorder(INJURED, Injury)), 
+           stat = 'identity') +
+  scale_fill_manual(values = c("#468966", "#77C4D3", "#FFB03B")) +
+  guides(fill = guide_legend(ncol = 3, title = 'Injury Type')) +
+  theme(legend.position = 'top',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+
+g + geom_text(data = injur_n_label_dt,
+              aes(x = PERIOD, y = N + 2000, label = N), size = 5)
+
+# Break down
+g + facet_wrap(~ INJURED)
+
+temp <- injur_n_label_dt %>% 
+  mutate(injur_rate = N / accident_n_dt$N)
+
+ggplot(data = temp, aes(x = PERIOD, y = injur_rate)) +
+  geom_line(group = 1, size = 2, alpha = .5, color = 'red') +
+  geom_label(aes(label = round(injur_rate, 3))) +
+  labs(x = NULL, y = 'Injury Per Accident') +
+  theme(legend.position = 'none', 
         axis.text=element_text(size=12),
         axis.title=element_text(size=14,face="bold")) +
-  labs(title = 'Yearly Growth Rate', y = '% Growth Since Last Year')
+  coord_cartesian(ylim = c(0, .5))
 
-#### 3. Death & Injury Per Period ####
+#### 4. Deaths Per Period ####
 death_n_dt <- kill_dt               %>%
   group_by(PERIOD, KILLED)          %>%
   summarise(Death = sum(KILLED_V))  %>%
@@ -142,7 +183,9 @@ g <- ggplot(data = death_n_dt) +
            stat = 'identity') +
   scale_fill_manual(values = c("#468966", "#77C4D3", "#FFB03B")) +
   guides(fill = guide_legend(ncol = 3, title = 'Killed Type')) +
-  theme(legend.position = 'top')
+  theme(legend.position = 'top',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
 
 g + geom_text(data = death_n_label_dt,
               aes(x = PERIOD, y = N + 20, label = N), size = 5)
@@ -184,14 +227,14 @@ ggplot(data = death_id_dt %>% filter(KILLED_V > 1),
 # One last exam on death - deaths per 1000 accidents
 temp <- data.frame(PERIOD = death_n_label_dt$PERIOD,
                    d_rate = death_n_label_dt$N / accident_n_dt$N * 1000)
-ggplot(data = temp, aes(x = PERIOD)) +
-  geom_bar(data = temp, aes(y = d_rate, fill = PERIOD),
-           stat = 'identity') +
-  labs(title = 'Deaths Per 1000 Accidents', x = NULL, y = NULL) +
+ggplot(data = temp, aes(x = PERIOD, y = d_rate)) +
+  geom_point(shape = 16, size = 3, color = 'red', alpha = .5) +
+  geom_line(aes(group = 1), size = 2, color = 'red', alpha = .5) +
+  labs(x = NULL, y = 'Deaths Per 1000 Accidents') +
   theme(legend.position = 'none') +
-  geom_text(aes(y = d_rate + .05, label = round(d_rate, 2)))
+  geom_label(aes(y = d_rate + .03, label = round(d_rate, 2)))
 
-#### 4. Find Deadlist Spots ####
+#### 5. Find Deadlist Spots ####
 # Accident count by location
 mvc_count <- work_dt %>%
   filter(!(is.na(LATITUDE) | is.na(LONGITUDE))) %>%
@@ -200,8 +243,24 @@ mvc_count <- work_dt %>%
   group_by(LAT, LON) %>%
   summarise(N = n())
 
+# Top injuries by location
+mvc_inj <- injur_dt %>%
+  filter(!(is.na(LATITUDE) | is.na(LONGITUDE))) %>%
+  filter(grepl('PERSONS', INJURED)) %>%
+  mutate(LAT = round(LATITUDE, 2),
+         LON = round(LONGITUDE, 2)) %>%
+  select(INJURED_V, LAT, LON) %>%
+  group_by(LAT, LON) %>%
+  summarise(INJURED_V = sum(INJURED_V)) %>%
+  arrange(desc(INJURED_V)) %>%
+  # table(mvc_sum$KILLED_V)
+  #   1   2   3   4   5 {}  6   7   8  10 
+  # 231 121  50  17  13 {}  8   4   2   1
+  # ^ Break here
+  filter(INJURED_V > 850)
+
 # Top deaths by location
-mvc_sum <- kill_dt %>%
+mvc_dth <- kill_dt %>%
   filter(!(is.na(LATITUDE) | is.na(LONGITUDE))) %>%
   filter(grepl('PERSONS', KILLED)) %>%
   mutate(LAT = round(LATITUDE, 2),
@@ -217,10 +276,12 @@ mvc_sum <- kill_dt %>%
   filter(KILLED_V >5)
   
 # Load NYC map
-nyc_map <- get_map(location = find_map_cent(mvc_count$LON, 
+# Only need to run once, then you can load map locally
+nyc_map <- get_map(location = find_map_cent(mvc_count$LON,
                                             mvc_count$LAT),
                    zoom = 11)
-save(nyc_map, file = 'nyc_map.RData')
+save(nyc_map, file = 'nyc_map.RData') 
+# load('nyc_map.RData') # Load saved nyc map to save time
 
 # Mapping accident counts
 ggmap(nyc_map, extent = 'device') +
@@ -236,47 +297,16 @@ ggmap(nyc_map, extent = 'device') +
 
 # Top Locations with most deaths
 ggmap(nyc_map, extent = 'device') +
-  geom_point(data = mvc_sum,
+  geom_point(data = mvc_dth,
              aes(x = LON, y = LAT,
                  size = KILLED_V,
                  fill = KILLED_V),
              shape = 21, alpha = .5) +
   scale_size_area(max_size = 10) +
   scale_fill_continuous(low = 'yellow', high = 'red') +
-  geom_text(data = mvc_sum, 
+  geom_text(data = mvc_dth, 
             aes(x = LON, y = LAT, label = KILLED_V),
             size = 4, check_overlap = T, fontface = "bold") +
   theme(legend.position = 'none') +
-  ggtitle('Deadlist Accidents July 2012 - June 2016')
-
-
-
-
-#### To be Continue ####
-###########################################################################
-# #### Explore Traffic Accident Factors ####
-# factor_dt <- melt_dt %>%
-#   merge(merge_dt, by.x = 'ID', by.y = 'UNIQUE KEY')      %>%
-#   arrange(ID)
-# 
-# # Find top factors
-# temp_df <- { 
-#   factor_dt                             %>%
-#     group_by(value)                     %>%
-#     summarise(total = sum(TOTAL_COUNT)) %>%
-#     arrange(desc(total))                %>%
-#     # 13761 Unspecified, does not helpful to analysis #
-#     filter(value != 'Unspecified')      %>%           #
-#     head(5)
-# }
-# ggplot() + geom_bar(data = temp_df, aes(x = reorder(value, total),
-#                                         y = total, fill = value),
-#                     stat = 'identity', position = 'dodge') +
-#   coord_flip() +
-#   labs(x = 'Total # of accidents', 
-#        y = 'Contribution Factor',
-#        title = 'Top traffic accident contributing factors') +
-#   theme(legend.position = 'none',
-#         plot.title = element_text(hjust = 0))
-
+  ggtitle('Deadlist Locations July 2012 - June 2016')
 
