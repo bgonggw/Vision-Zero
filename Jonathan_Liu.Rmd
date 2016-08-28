@@ -1,0 +1,331 @@
+---
+title: "Has Vision Zero Made NYC Safer?"
+author: "Jonathan Liu"
+output:
+  ioslides_presentation:
+    widescreen: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache= TRUE, echo = FALSE, 
+                      fig.align = 'center',
+                      message = FALSE,
+                      warning = FALSE)
+
+#### Library List ####
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggmap)
+library(maps)
+library(caTools) # In case subset is needed
+library(RColorBrewer)
+# setwd('C:/Users/jonat/Dropbox/Bootcamp/Visualization Project/Jonathan_Liu')
+
+# Load UDFs
+sapply(paste0('UDF/', list.files('UDF')), source)
+
+#### Read & Convert Data ####
+collision <- fread('NYPD_Motor_Vehicle_Collisions.csv', stringsAsFactors = F)
+
+# Transform Date & Time (rounded to hour)
+work_dt <- collision %>%  
+  mutate(FULLDATE = as.POSIXct(paste(DATE, TIME), 
+                               format = '%m/%d/%Y %H:%M',
+                               tz = 'EST')
+  ) %>%
+  mutate(YEAR = year(FULLDATE), 
+         MONTH = month(FULLDATE),
+         DAY = mday(FULLDATE),
+         HOUR = hour(round(FULLDATE, 'hour'))
+  ) %>%
+  as.data.table
+
+# Data group for yearly comparison (Each period July - June)
+work_dt[MONTH <  7, PERIOD := paste(YEAR - 1, YEAR, sep = '-')]
+work_dt[MONTH >= 7, PERIOD := paste(YEAR, YEAR + 1, sep = '-')]
+# Remove 2016.7, since it falls into period 2016-2017
+work_dt <- work_dt[PERIOD != '2016-2017']
+
+# Build subsets for each topic
+right_dt  <- work_dt %>%
+  select(-starts_with('CONTRIBUTING FACTOR'), 
+         -starts_with('VEHICLE TYPE CODE'), 
+         -matches('KILLED|INJURED'),
+         ID = `UNIQUE KEY`)
+
+kill_dt <- melt_count(work_dt, 'matches', 'KILLED', 'stat') %>% 
+  merge(right_dt, by = 'ID')
+```
+
+# About Vision Zero
+
+## <img src='img/visionzero-logo-blue-500.png'>
+  
+  - Started in Sweden in October 1997
+  
+  - Adopted in January, 2014, 
+    announced by NYC Mayor Bill de Blasio
+    
+  - To reduce traffic fatalities
+
+## Major Initiatives
+
+  - Legislative:
+    - Speed Limit: 30 MPH -> 25 MPH
+  - NYPD:
+    - Stricter enforcement
+  - DOT:
+    - More red light cameras
+  - Open NYC:
+    - Motor Vehicle Collision Record Dataset
+
+# About Data
+
+## Time Range
+```{r Original time range}
+
+g <- ggplot(data = sample_set(work_dt),
+            aes(x = factor(month(FULLDATE)), 
+                y = YEAR))
+g +
+  geom_tile(aes(fill = factor(YEAR)), color = 'white') +
+  labs(x = 'Month', title = 'Time Range of NYC Motor Vehicle Collision Data') +
+  theme(legend.position = 'none', 
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")
+        )
+```
+
+## Customize 12 Month Periods
+```{r Group by 12-month periods for analysis}
+g +
+  geom_tile(aes(fill = PERIOD), color = 'white') +
+  labs(x = 'Month') +
+  theme(legend.position = 'top',
+        legend.title = element_text(face="bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")
+        )
+```
+
+## Other Aspects
+
+  - 837075 total accidents
+  - 29 variables
+    - Location
+    - Kills & Injuries
+    - Vehicle Type
+    - Contributing Factors
+
+## Number of Accidents Per Period
+```{r}
+#### 2. Count of accidents per year ####
+accident_n_dt <- work_dt %>%
+  group_by(PERIOD) %>%
+  summarise(N = n())
+
+ggplot(data = accident_n_dt) +
+  geom_bar(aes(x = PERIOD, y = N, fill = PERIOD), stat = 'identity') +
+  labs(x = NULL, y = NULL, 
+       title = 'Number of Motor Vehicle Collisions for Each 12-Month Period') +
+  theme(legend.position = 'none',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) +
+  scale_y_continuous(labels = scales::comma) +
+  geom_text(aes(x = PERIOD, y = N - 6000, label = N), size = 5)
+```
+
+## Percent Change Per Period
+```{r}
+# Seems not changing that much, what about percentage?
+accident_p_vec <- c(0, tail(accident_n_dt$N, nrow(accident_n_dt) - 1) / 
+                head(accident_n_dt$N, nrow(accident_n_dt) - 1) - 1)
+
+reg_nyc <- read.csv('nyc_car_reg.csv')
+reg_p_vec <- c(0, tail(reg_nyc$Reg_num, nrow(reg_nyc)-1) /
+                 head(reg_nyc$Reg_num, nrow(reg_nyc)-1) - 1)
+
+ggplot(data = data.frame(Year = rep(seq(2012, 2015), 2),
+                         Type = rep(c('mvc', 'reg'), each = 4),
+                         P = c(accident_p_vec, reg_p_vec)),
+       aes(x = Year, y = P, color = Type)
+       ) + 
+  geom_point(size = 3) +
+  geom_line(size = 2, alpha = .5) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_discrete(name = NULL,
+                       labels = c('Accidents',
+                                  'Registered Cars')) +
+  guides(color = guide_legend(ncol = 1)) +
+  theme(legend.justification=c(0,1), legend.position=c(.05,.95),
+        legend.background = element_rect(fill = alpha('white', 0)),
+        legend.text = element_text(size = 12, face = "bold"),        
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) +
+  labs(x = NULL, y = '% Growth Since Last Year',
+       title = 'Growth Since Last Year')
+```
+
+- Reference: [Number of vehicle registration in NYC](https://dmv.ny.gov/about-dmv/statistical-summaries)
+
+# Death Related Accidents
+
+## Number of Deaths Per Period
+``` {r}
+death_n_dt <- kill_dt               %>%
+  group_by(PERIOD, KILLED)          %>%
+  summarise(death = sum(KILLED_V))  %>%
+  filter(!grepl('PERSONS', KILLED)) %>% # Num. of persons is the total of 
+                                        # other three stats
+  arrange(desc(death))
+
+death_n_dt$KILLED <- death_n_dt$KILLED %>% 
+  gsub('NUMBER OF ', '', .) %>%
+  gsub(' KILLED', '', .)
+
+death_n_label_dt <- death_n_dt %>%
+  group_by(PERIOD) %>%
+  summarise(N = sum(death))
+
+g <- ggplot(data = death_n_dt) +
+  geom_bar(aes(x = PERIOD, y = death, fill = reorder(KILLED, death)), 
+           stat = 'identity') +
+  scale_fill_manual(values = c("#468966", "#77C4D3", "#FFB03B")) +
+  guides(fill = guide_legend(ncol = 3, title = 'Killed Type')) +
+  theme(legend.position = 'top') +
+  ylab('Death')
+
+g + geom_text(data = death_n_label_dt,
+              aes(x = PERIOD, y = N + 20, label = N), size = 5)
+```
+
+## Number of Deaths Per Period - Breakdown
+```{r fig.width=10}
+g + facet_wrap(~ KILLED)
+```
+
+## Deaths Per Accident by Period
+```{r}
+# What about severe accidents?
+# Data for violin density plot
+death_id_dt <- kill_dt %>% 
+  filter(grepl('PERSONS', KILLED))
+# Data for density plot labeling
+death_density_dt <- death_id_dt %>%
+  group_by(PERIOD, KILLED_V) %>%
+  summarise(N = n())
+
+ggplot(data = death_id_dt) +
+  geom_violin(aes(x = PERIOD, y = KILLED_V, fill = PERIOD)) +
+  labs(y = 'Death(s) Per Accident') +
+  theme(legend.position = 'none',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+```
+
+## Deaths Density Per Period - Severe Accidents
+```{r}
+ggplot(data = death_id_dt %>% filter(KILLED_V > 1),
+       aes(x = PERIOD, y = KILLED_V, fill = PERIOD)) +
+  geom_violin(fill = 'gray', alpha = .5, color = 'gray') +
+  labs(y = 'Death(s) Per Accident') +
+  theme(legend.position = 'none',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) +
+  geom_dotplot(binaxis = "y", stackdir = "center") + 
+  geom_label(data = death_density_dt %>% filter(KILLED_V > 1), 
+            aes(x = PERIOD, y = KILLED_V + .15, label = N), 
+            fontface = "bold")
+```
+
+## Death Per 1000 Accidents
+```{r}
+temp <- data.frame(PERIOD = death_n_label_dt$PERIOD,
+                   d_rate = death_n_label_dt$N / accident_n_dt$N * 1000)
+ggplot(data = temp, aes(x = PERIOD)) +
+  geom_bar(data = temp, aes(y = d_rate, fill = PERIOD),
+           stat = 'identity') +
+  labs(title = 'Deaths Per 1000 Accidents', x = NULL, y = NULL) +
+  theme(legend.position = 'none',
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) +
+  geom_text(aes(y = d_rate + .05, label = round(d_rate, 2)))
+```
+
+# Find Deadlist Spots
+```{r, include=FALSE}
+# Accident count by location
+mvc_count <- work_dt %>%
+  filter(!(is.na(LATITUDE) | is.na(LONGITUDE))) %>%
+  mutate(LAT = round(LATITUDE, 2),
+         LON = round(LONGITUDE, 2)) %>%
+  group_by(LAT, LON) %>%
+  summarise(N = n())
+
+# Top deaths by location
+mvc_sum <- kill_dt %>%
+  filter(!(is.na(LATITUDE) | is.na(LONGITUDE))) %>%
+  filter(grepl('PERSONS', KILLED)) %>%
+  mutate(LAT = round(LATITUDE, 2),
+         LON = round(LONGITUDE, 2)) %>%
+  select(KILLED_V, LAT, LON) %>%
+  group_by(LAT, LON) %>%
+  summarise(KILLED_V = sum(KILLED_V)) %>%
+  arrange(desc(KILLED_V)) %>%
+  # table(mvc_sum$KILLED_V)
+  #   1   2   3   4   5 {}  6   7   8  10 
+  # 231 121  50  17  13 {}  8   4   2   1
+                      # ^ Break here
+  filter(KILLED_V >5)
+
+# Load NYC map
+load('nyc_map.RData')
+```
+
+## Accident Frequencies by Location
+```{r, fig.height=5}
+ggmap(nyc_map, extent = 'device') +
+  geom_point(data = mvc_count, alpha = .5,
+             aes(x = LON, y = LAT, color = N, size = N)) +
+  scale_color_gradient(low = 'white', high = 'red') +
+  theme(legend.justification=c(1,1), legend.position=c(.95,.5),
+        legend.background = element_rect(color = 'black',
+                                         fill = alpha('white', 0.8)),
+        legend.title = element_blank()) +
+  guides(size = FALSE) +
+  coord_cartesian(ylim = c(40.59, 40.86))
+```
+
+## Deadlist Accidents {.smaller}
+```{r, fig.height=5}
+ggmap(nyc_map, extent = 'device') +
+  geom_point(data = mvc_sum,
+             aes(x = LON, y = LAT,
+                 size = KILLED_V,
+                 fill = KILLED_V),
+             shape = 21, alpha = .5) +
+  scale_size_area(max_size = 10) +
+  scale_fill_continuous(low = 'yellow', high = 'red') +
+  geom_text(data = mvc_sum, 
+            aes(x = LON, y = LAT, label = KILLED_V),
+            size = 4, check_overlap = T, fontface = "bold") +
+  theme(legend.position = 'none') +
+  coord_cartesian(ylim = c(40.59, 40.86))
+```
+
+
+# Insights
+## What's the conclusion?
+
+  - Lack of concerns on Cyclists
+    - Hostile road condition
+
+  - NYC is indeed becoming safer since Vision Zero initiative
+    - Causation or Correlation?
+
+  - New York, New York
+    - High frequency & fatalities
+
+---
+<center><img src='img/ThankYou.jpg' width="800" height="600"></center>
