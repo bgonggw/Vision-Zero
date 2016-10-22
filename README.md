@@ -1,6 +1,6 @@
 # Vision-Zero
 Visualization on NYC Motor Vehicle Collision Dataset
-
+https://jonathanlxy.github.io/Vision-Zero/
 
 ### Reference
 
