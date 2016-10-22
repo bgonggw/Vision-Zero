@@ -1,5 +1,6 @@
-# Vision-Zero
+# Has Vision Zero Made NYC Safer?
 Visualization on NYC Motor Vehicle Collision Dataset
+
 https://jonathanlxy.github.io/Vision-Zero/
 
 ### Reference
