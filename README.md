@@ -1,7 +1,9 @@
 # Has Vision Zero Made NYC Safer?
-This repository stores all my code for the project __Visualization on NYC Motor Vehicle Collision Dataset__
+This repository stores all my code for the project <p><a href="http://blog.nycdatascience.com/student-works/r-visualization/has-vision-zero-made-nyc-safer/">Has Vision Zero Made NYC Safer?</a></p>
 
-Rmarkdown slides can be viewed at https://jonathanlxy.github.io/Vision-Zero/
+The Rmarkdown slides can be viewed at https://jonathanlxy.github.io/Vision-Zero/
+
+
 
 The original Rmd file is also included in this repository
 
